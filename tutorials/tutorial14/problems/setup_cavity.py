@@ -13,6 +13,7 @@ from pina.problem import ParametricProblem
 from pina.geometry import CartesianDomain
 from pina import Condition, LabelTensor
 from rom.corrected_rom import CorrectedROM
+from utils.scaler import InfNormScaler
 import numpy as np
 
 
@@ -30,14 +31,18 @@ class CavityProblem:
         train_size: Number of training samples.
         test_size: Number of test samples.
         device: 'cpu' or 'gpu'.
+        scaler: Scalers the exact corrections to an O(1) scale. Set to None
+            to disable correction scaling (default: InfNormScaler()).
     """
 
-    def __init__(self, field, reddim, subset=None, train_size=100, test_size=100, device='cpu'):
+    def __init__(self, field, reddim, subset=None, train_size=100, test_size=100,
+                 device='cpu', scaler=InfNormScaler()):
         self.field = field
         self.reddim = reddim
         self.train_size = train_size
         self.test_size = test_size
         self.device = device
+        self.scaler = scaler
         self._load_data()
         self._train_test_split()
         if self.device == 'gpu':
@@ -47,6 +52,10 @@ class CavityProblem:
             self.gpu()
         self._fit_rbf()
         self._compute_corrections()
+        if self.scaler is not None:
+            labels = self.exact_correction.labels
+            self.exact_correction = self.scaler.fit_transform(self.exact_correction.tensor)
+            self.exact_correction = LabelTensor(self.exact_correction, labels)
         if subset is not None:
             self.subset_size = subset
             self._extract_subset()

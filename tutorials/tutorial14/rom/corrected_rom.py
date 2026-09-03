@@ -6,6 +6,7 @@ to approximate high-fidelity solutions. The correction network learns the
 residual between snapshots and their POD-RBF reconstruction.
 """
 import torch
+from pina import LabelTensor
 from pina.solvers import SupervisedSolver
 
 
@@ -171,7 +172,12 @@ class CorrectedROM(SupervisedSolver):
         Returns:
             Exact correction terms (LabelTensor).
         """
-        return snaps - pod.expand(pod.reduce(snaps))
+        corr = snaps - pod.expand(pod.reduce(snaps))
+        # Rebuild a properly-labeled LabelTensor: PINA's LabelTensor - LabelTensor
+        # returns a LabelTensor without _labels, which breaks later .cpu()/indexing.
+        if isinstance(snaps, LabelTensor):
+            corr = LabelTensor(corr.tensor, snaps.labels)
+        return corr
 
     @property
     def neural_net(self):

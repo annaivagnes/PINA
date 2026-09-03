@@ -29,7 +29,7 @@ import matplotlib.pyplot as plt
 from scipy.stats import gaussian_kde
 from pytorch_lightning.callbacks import Callback, EarlyStopping
 
-from pina import Trainer, Plotter
+from pina import Trainer, Plotter, LabelTensor
 from pina.callbacks import MetricTracker
 from pina.loss import LpLoss
 
@@ -92,11 +92,14 @@ def create_correction_network(args, backstep):
                 pod=backstep.pod,
                 coeffs=backstep.pod.reduce(backstep.snapshots_train),
                 interp=backstep.rbf,
+                scaler=backstep.scaler,
             )
         case "quadnet":
-            return QuadNet(backstep.modes, backstep.coords)
+            return QuadNet(backstep.modes, backstep.coords,
+                           scaler=backstep.scaler)
         case "quadnetmu":
-            return QuadNetMu(backstep.modes, backstep.coords)
+            return QuadNetMu(backstep.modes, backstep.coords,
+                             scaler=backstep.scaler)
         case _:
             raise ValueError(f"Unknown correction type: {args.correction}")
 
@@ -194,7 +197,7 @@ def main(arguments=None):
             **opt_config,
         )
 
-        
+
         early = EarlyStopping(
             monitor='loss_corr', patience=5000,
             stopping_threshold=1e-2, check_on_train_epoch_end=True)
@@ -264,11 +267,13 @@ def main(arguments=None):
         coeff_orig = rom.neural_net["interpolation_network"](backstep.params_test)
         corr_scaler = rom.neural_net["correction_network"].scaler
         corr = corr_net(backstep.params_test, coeff_orig)
-        corr = corr.tensor.cpu().detach().numpy()[ind_test, :].reshape(-1)
+        if corr_scaler is not None:
+            corr = corr_scaler.inverse_transform(corr)
+        corr = corr.tensor.cpu().detach().numpy() if isinstance(corr, LabelTensor) \
+            else corr.cpu().detach().numpy()
+        corr = corr[ind_test, :].reshape(-1)
 
         exact_corr = CorrectedROM.compute_exact_correction(backstep.pod, backstep.snapshots_test)
-        if corr_scaler is not None:
-            exact_corr = corr_scaler.transform(exact_corr)
         exact_corr = exact_corr[ind_test].tensor.cpu().detach().numpy().reshape(-1)
 
         list_fields = [corr, exact_corr, corr - exact_corr]

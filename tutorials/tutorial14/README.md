@@ -30,6 +30,17 @@ exact_correction = snaps - POD.expand(POD.reduce(snaps))
 The correction network is trained to match this exact correction, so the
 final prediction recovers the neglected-modes contribution.
 
+### Correction scaler
+
+Before training, the exact corrections are normalized to an O(1) scale by an
+`InfNormScaler` (each row divided by the mean infinity norm of the data). This
+generally improves network training and is applied by default in
+`BackstepProblem` / `CavityProblem` via the `scaler` constructor argument
+(pass `scaler=None` to disable). The fitted scale is attached to the correction
+network and used to **inverse-transform** the correction both when it is added
+to the POD-RBF solution in `CorrectedROM.forward` and whenever it is plotted,
+so plotted values and predicted snapshots are always in the original scale.
+
 ### Supported datasets
 
 The datasets are taken from the library `smithers`.
@@ -91,7 +102,7 @@ tutorial14/
 │
 ├── utils/                     # shared utilities
 │   ├── plotting.py            #   plot() for triangular mesh fields
-│   └── scaler.py              #   Min-Max scaler for LabelTensors
+│   └── scaler.py              #   Min-Max and infinity-norm scalers
 │
 ├── scripts/                   # executable entry points
 │   ├── run_backstep.py        #   unified backstep runner
@@ -122,7 +133,7 @@ tutorial14/
 | `problems.setup_backstep` | `BackstepProblem` | Backstep data pipeline |
 | `problems.setup_cavity` | `CavityProblem` | Cavity data pipeline |
 | `utils.plotting` | `plot` | Plot fields on a triangular mesh |
-| `utils.scaler` | `Scaler` | Min-Max scaler for LabelTensors |
+| `utils.scaler` | `Scaler`, `InfNormScaler` | Scaling helpers for LabelTensors (Min-Max; infinity-norm correction scaler) |
 
 ---
 

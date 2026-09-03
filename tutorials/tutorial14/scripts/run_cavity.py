@@ -29,7 +29,7 @@ import matplotlib.pyplot as plt
 from scipy.stats import gaussian_kde
 from pytorch_lightning.callbacks import Callback, EarlyStopping
 
-from pina import Trainer, Plotter
+from pina import Trainer, Plotter, LabelTensor
 from pina.callbacks import MetricTracker, SwitchOptimizer
 from pina.loss import LpLoss
 
@@ -90,11 +90,14 @@ def create_correction_network(args, cavity):
                 pod=cavity.pod,
                 coeffs=cavity.pod.reduce(cavity.snapshots_train),
                 interp=cavity.rbf,
+                scaler=cavity.scaler,
             )
         case "quadnet":
-            return QuadNet(cavity.modes, cavity.coords)
+            return QuadNet(cavity.modes, cavity.coords,
+                           scaler=cavity.scaler)
         case "quadnetmu":
-            return QuadNetMu(cavity.modes, cavity.coords)
+            return QuadNetMu(cavity.modes, cavity.coords,
+                             scaler=cavity.scaler)
         case _:
             raise ValueError(f"Unknown correction type: {args.correction}")
 
@@ -270,11 +273,13 @@ def main(arguments=None):
         coeff_orig = rom.neural_net["interpolation_network"](cavity.params_test)
         corr_scaler = rom.neural_net["correction_network"].scaler
         corr = corr_net(cavity.params_test, coeff_orig)
-        corr = corr.tensor.cpu().detach().numpy()[ind_test, :].reshape(-1)
+        if corr_scaler is not None:
+            corr = corr_scaler.inverse_transform(corr)
+        corr = corr.tensor.cpu().detach().numpy() if isinstance(corr, LabelTensor) \
+            else corr.cpu().detach().numpy()
+        corr = corr[ind_test, :].reshape(-1)
 
         exact_corr = CorrectedROM.compute_exact_correction(cavity.pod, cavity.snapshots_test)
-        if corr_scaler is not None:
-            exact_corr = corr_scaler.transform(exact_corr)
         exact_corr = exact_corr[ind_test].tensor.cpu().detach().numpy().reshape(-1)
 
         list_fields = [corr, exact_corr, corr - exact_corr]

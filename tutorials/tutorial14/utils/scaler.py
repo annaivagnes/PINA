@@ -1,11 +1,79 @@
 """
-Min-Max scaler for LabelTensors.
+Scalers for LabelTensors.
 
-A custom min-max scaler similar to sklearn's MinMaxScaler,
-but designed to work with PINA LabelTensors while preserving labels.
+Provides two scalers:
+    - MinMaxScaler-like `Scaler` for scaling features to a range.
+    - `InfNormScaler`, a torch.nn.Module scaler that normalizes correction
+      terms by their mean infinity norm, supporting fit/transform/
+      inverse_transform and buffering for checkpointing.
 """
 import torch
+import torch.nn as nn
 from pina import LabelTensor
+
+
+class InfNormScaler(nn.Module):
+    """
+    Scaler that normalizes data by the mean of its infinity norm.
+
+    Each row is divided by a single scalar `scale` computed as the mean of
+    the per-row infinity norms, so corrections are brought to an O(1) scale,
+    which generally improves network training.
+
+    Example:
+        scaler = InfNormScaler()
+        scaled = scaler.fit_transform(exact_correction)   # normalize
+        original = scaler.inverse_transform(scaled)       # restore scale
+    """
+
+    def __init__(self):
+        super().__init__()
+        self.register_buffer("scale", torch.tensor(1.0))
+
+    def fit(self, data):
+        """
+        Compute the mean infinity norm of the data.
+
+        Args:
+            data: Tensor or LabelTensor.
+        """
+        data = data.tensor if isinstance(data, LabelTensor) else data
+        self.scale = torch.linalg.norm(data, ord=float('inf'), dim=-1).mean()
+
+    def transform(self, data):
+        """
+        Divide data by the fitted scale.
+
+        Args:
+            data: Tensor or LabelTensor.
+
+        Returns:
+            Scaled tensor (labels preserved if a LabelTensor was given).
+        """
+        if isinstance(data, LabelTensor):
+            return data.tensor / self.scale
+        return data / self.scale
+
+    def inverse_transform(self, data):
+        """
+        Multiply data by the fitted scale to restore the original magnitude.
+
+        Args:
+            data: Tensor or LabelTensor.
+
+        Returns:
+            Original-scale tensor.
+        """
+        if isinstance(data, LabelTensor):
+            return data.tensor * self.scale
+        return data * self.scale
+
+    def fit_transform(self, data):
+        """
+        Fit and transform in one step.
+        """
+        self.fit(data)
+        return self.transform(data)
 
 
 class Scaler:
