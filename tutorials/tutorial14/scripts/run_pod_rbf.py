@@ -25,6 +25,7 @@ from smithers.dataset import LidCavity, NavierStokesDataset
 from rom.pod_rbf import err, PODRBF
 from utils.plotting import plot
 os.makedirs("img", exist_ok=True)
+torch.manual_seed(42)
 
 def load_dataset(dataset, field):
     """

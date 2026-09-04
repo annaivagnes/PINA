@@ -41,6 +41,7 @@ from rom.pod_rbf import err, PODRBF
 from utils.plotting import plot
 from problems.setup_cavity import CavityProblem
 os.makedirs("img", exist_ok=True)
+torch.manual_seed(42)
 
 def resolve_device(requested):
     """

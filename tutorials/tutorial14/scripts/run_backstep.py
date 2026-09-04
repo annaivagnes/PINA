@@ -32,15 +32,15 @@ from pytorch_lightning.callbacks import Callback, EarlyStopping
 from pina import Trainer, Plotter, LabelTensor
 from pina.callbacks import MetricTracker
 from pina.loss import LpLoss
-
 from nns.quadls import QuadLS
 from nns.quadnet import QuadNet
 from nns.quadnet_mu import QuadNetMu
 from rom.corrected_rom import CorrectedROM
 from rom.pod_rbf import err, PODRBF
 from utils.plotting import plot
+from utils.scaler import InfNormScaler
 from problems.setup_backstep import BackstepProblem
-
+torch.manual_seed(42)
 
 def resolve_device(requested):
     """
@@ -123,25 +123,15 @@ def get_optimizer_config(args):
             }
         case "quadnet":
             return {
-                "optimizer": torch.optim.Adam,
-                "optimizer_kwargs": {"lr": 1e-2, "weight_decay": 1e-3},
-                "loss": LpLoss(relative=True),
-                "scheduler": torch.optim.lr_scheduler.MultiStepLR,
-                "scheduler_kwargs": {
-                    "milestones": [1000, 2000, 3000, 4000],
-                    "gamma": 0.9,
-                },
+                "optimizer": torch.optim.AdamW,
+                "optimizer_kwargs": {"lr": 1e-3, "weight_decay": 1e-4},
+                "loss": torch.nn.MSELoss(),
             }
         case "quadnetmu":
             return {
-                "optimizer": torch.optim.Adam,
-                "optimizer_kwargs": {"lr": 1e-2, "weight_decay": 1e-3},
-                "loss": LpLoss(relative=True),
-                "scheduler": torch.optim.lr_scheduler.MultiStepLR,
-                "scheduler_kwargs": {
-                    "milestones": [1000, 2000, 3000, 4000],
-                    "gamma": 0.9,
-                },
+                "optimizer": torch.optim.AdamW,
+                "optimizer_kwargs": {"lr": 1e-3, "weight_decay": 1e-4},
+                "loss": torch.nn.MSELoss(),
             }
 
 
@@ -175,14 +165,14 @@ def main(arguments=None):
     # Set up data
     backstep = BackstepProblem(
         args.field, args.reddim, subset=None,
-        train_size=args.train, device=device)
+        train_size=args.train, device=device, scaler=InfNormScaler())
     problem = backstep.problem
 
     # Create correction network
     corr_net = create_correction_network(args, backstep)
 
     if args.train > 10 or args.correction == "quadls":
-        num_batches = 4
+        num_batches = 1
     else:
         num_batches = 1
 
@@ -200,7 +190,7 @@ def main(arguments=None):
 
         early = EarlyStopping(
             monitor='loss_corr', patience=5000,
-            stopping_threshold=1e-2, check_on_train_epoch_end=True)
+            stopping_threshold=1e-4, check_on_train_epoch_end=True)
 
         trainer = Trainer(
             solver=rom,
@@ -242,6 +232,7 @@ def main(arguments=None):
         # Evaluate on train and test
         predicted_snaps_train = rom(backstep.params_train)
         predicted_snaps_test = rom(backstep.params_test)
+        
         train_error = err(backstep.snapshots_train, predicted_snaps_train)
         test_error = err(backstep.snapshots_test, predicted_snaps_test)
         print(f'Train error: {train_error}\nTest error: {test_error}')
@@ -249,12 +240,21 @@ def main(arguments=None):
         # Plot comparison: truth vs corrected vs baseline POD-RBF
         data = backstep.data
         ind_test = 2
+        err_all = backstep.snapshots_test-predicted_snaps_test
+        print(err_all.min())
+        print(err_all.max())
+        print(err_all.shape)
+        coords = data.pts_coordinates
+        
         snap = backstep.snapshots_test[ind_test].tensor.cpu().detach().numpy().reshape(-1)
         pred_snap = predicted_snaps_test[ind_test].tensor.cpu().detach().numpy().reshape(-1)
 
-        pod_rbf = PODRBF(pod_rank=args.reddim, rbf_kernel='thin_plate_spline')
-        pod_rbf.fit(backstep.params_train, backstep.snapshots_train)
-        pred_pod_rbf = pod_rbf(backstep.params_test).tensor.cpu().detach().numpy()[ind_test].reshape(-1)
+        #pod_rbf = PODRBF(pod_rank=args.reddim, rbf_kernel='thin_plate_spline')
+        #pod_rbf.fit(backstep.params_train, backstep.snapshots_train)
+        #pred_pod_rbf = pod_rbf(backstep.params_test).tensor.cpu().detach().numpy()[ind_test].reshape(-1)
+        pod = backstep.pod
+        rbf = backstep.rbf
+        pred_pod_rbf = pod.expand(rbf(backstep.params_test))[ind_test].tensor.cpu().detach().numpy().reshape(-1)
 
         list_fields = [snap, pred_snap, pred_pod_rbf,
                        snap - pred_snap, snap - pred_pod_rbf]
@@ -262,6 +262,7 @@ def main(arguments=None):
                        'Error Corrected', 'Error POD']
         plot(data.triang, list_fields, list_labels,
              filename=f'img/{args.correction}_compare')
+        plt.close()
 
         # Plot correction: approximated vs exact
         coeff_orig = rom.neural_net["interpolation_network"](backstep.params_test)
@@ -269,11 +270,21 @@ def main(arguments=None):
         corr = corr_net(backstep.params_test, coeff_orig)
         if corr_scaler is not None:
             corr = corr_scaler.inverse_transform(corr)
+        print("min pred corr", (corr).min())
+        print("max pred corr", (corr).max())
         corr = corr.tensor.cpu().detach().numpy() if isinstance(corr, LabelTensor) \
             else corr.cpu().detach().numpy()
         corr = corr[ind_test, :].reshape(-1)
 
         exact_corr = CorrectedROM.compute_exact_correction(backstep.pod, backstep.snapshots_test)
+        print("min exact corr", (exact_corr).min())
+        print("max exact corr", (exact_corr).max())
+        plt.scatter(coords[0, :], coords[1, :], c=exact_corr.tensor.cpu().detach().numpy()[0, :])
+        plt.colorbar()
+        plt.show()
+        plt.close()
+        
+
         exact_corr = exact_corr[ind_test].tensor.cpu().detach().numpy().reshape(-1)
 
         list_fields = [corr, exact_corr, corr - exact_corr]

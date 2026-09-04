@@ -65,7 +65,6 @@ class CorrectedROM(SupervisedSolver):
                 problem.conditions["correction"].input_points,
                 problem.conditions["correction"].output_points,
             )
-
         self.modes = reduction_network.basis
 
     def forward(self, input_params):
@@ -129,11 +128,10 @@ class CorrectedROM(SupervisedSolver):
         """
         interpolation_network = self.neural_net["interpolation_network"]
         correction_network = self.neural_net["correction_network"]
-
         coeff_orig = interpolation_network(input_pts)
         approx_correction = correction_network(input_pts, coeff_orig)
         exact_correction = output_pts
-
+ 
         loss_correction = self.loss(approx_correction, exact_correction)
 
         # Orthogonal components loss: penalize correlation between POD modes

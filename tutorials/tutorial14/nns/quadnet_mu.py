@@ -8,7 +8,7 @@ computing the correction operator. The operator is:
 import torch
 import torch.nn as nn
 from pina.model import FeedForward
-
+from utils.scaler import InfNormScaler
 
 class QuadNetMu(nn.Module):
     """
@@ -34,6 +34,8 @@ class QuadNetMu(nn.Module):
     def __init__(self, modes, coordinates, scaler=None):
         super().__init__()
         self.scaler = scaler
+        self.scaler_coords = InfNormScaler()
+        self.scaler_modes = InfNormScaler()
         self.modes = modes
         self.coords = coordinates
         r = modes.shape[1]
@@ -73,8 +75,8 @@ class QuadNetMu(nn.Module):
         Returns:
             Correction terms, shape (N, N_dof).
         """
-        z1 = self.b(self.modes)             # (N_dof, K)
-        z2 = self.t(self.coords)            # (N_dof, K)
+        z1 = self.b(self.scaler_modes.fit_transform(self.modes))             # (N_dof, K)
+        z2 = self.t(self.scaler_coords.fit_transform(self.coords))            # (N_dof, K)
         z3 = self.bmu(par)                  # (N, K)
         # Per-parameter, per-spatial-point operator: (N, N_dof, K)
         z = torch.einsum('bi,Ni,Ni->bNi', z3, z2, z1)

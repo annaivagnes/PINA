@@ -8,7 +8,7 @@ coordinates. The correction is: coeff^T @ C(x,y) @ coeff.
 import torch
 import torch.nn as nn
 from pina.model import FeedForward
-
+from utils.scaler import InfNormScaler
 
 class QuadNet(nn.Module):
     """
@@ -31,6 +31,10 @@ class QuadNet(nn.Module):
     def __init__(self, modes, coordinates, scaler=None):
         super().__init__()
         self.scaler = scaler
+        self.scaler_modes = InfNormScaler()
+        self.scaler_coords = InfNormScaler()
+        self.scaler_modes.fit(modes)
+        self.scaler_coords.fit(coordinates)
         self.modes = modes
         self.coords = coordinates
         r = modes.shape[1]
@@ -64,8 +68,8 @@ class QuadNet(nn.Module):
         Returns:
             Correction terms, shape (N, N_dof).
         """
-        z1 = self.b(self.modes)
-        z2 = self.t(self.coords)
+        z1 = self.b(self.scaler_modes.transform(self.modes))
+        z2 = self.t(self.scaler_coords.transform(self.coords))
         c = self.red(z1 * z2)
 
         r = self.modes.shape[1]
